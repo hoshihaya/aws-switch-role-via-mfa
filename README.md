@@ -69,6 +69,10 @@ role_name = your-role2
 
 ```
 $ aws-switch-role-via-mfa mfa
+
+または
+
+$ aws-switch-role-via-mfa mfa $MFA_TOKEN
 ```
 
 2. assume roleで一時認証情報を取得し、暗号化して一時保存
