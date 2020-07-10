@@ -167,9 +167,6 @@ EOS
     else
       session_name=${option1}
     fi
-    account_id=$(egrep -A 10 "^\[${session_name}\]" ${switch_role_config_path} | grep aws_account_id | head -1 | awk -F '=' '{print $2}' | tr -d ' ')
-    role_name=$(egrep -A 10 "^\[${session_name}\]" ${switch_role_config_path} | grep role_name | head -1 | awk -F '=' '{print $2}' | tr -d ' ')
-    role_arn="arn:aws:iam::${account_id}:role/${role_name}"
 
     export AWS_SECRET_ACCESS_KEY=$(openssl aes-256-cbc -d -in ${cache_dir}/${session_name}.sts.enc -pass file:${enc_salt_path} | grep SecretAccessKey | awk '{print $2}' | sed -e 's/"//g' | sed -e 's/,//')
     export AWS_ACCESS_KEY_ID=$(openssl aes-256-cbc -d -in ${cache_dir}/${session_name}.sts.enc -pass file:${enc_salt_path} | grep AccessKeyId | awk '{print $2}' | sed -e 's/"//g' | sed -e 's/,//')
