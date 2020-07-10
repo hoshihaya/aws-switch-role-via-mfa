@@ -201,7 +201,13 @@ show_switch_credentials(){
 
 get_token_via_mfa(){
   # get-session-token でMFAを利用して一時認証情報を取得し、暗号化してファイルに吐く
-  echo 'MFA token code: '; read mfa_token_code; echo ""; aws --profile $(cat ${profile_name_path}) sts get-session-token --serial-number $(cat ${mfa_serial_number_path}) --token-code ${mfa_token_code} | openssl aes-256-cbc -e -out ${cache_dir}/mfa_session_token.sts.enc -pass file:${enc_salt_path}
+  # assume-role で一時認証情報を取得し、暗号化してファイルに吐く
+  if [ "${option1}" = "NOT_SPECIFIED" ]; then
+    echo 'MFA token code: '; read mfa_token_code; echo ""
+  else
+    mfa_token_code=${option1}
+  fi
+  aws --profile $(cat ${profile_name_path}) sts get-session-token --serial-number $(cat ${mfa_serial_number_path}) --token-code ${mfa_token_code} | openssl aes-256-cbc -e -out ${cache_dir}/mfa_session_token.sts.enc -pass file:${enc_salt_path}
 }
 
 assume_role(){
