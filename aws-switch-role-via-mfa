@@ -1,0 +1,277 @@
+#!/bin/sh
+set -eu
+
+script_name=$(basename "$0")
+script_dir=$(cd $(dirname $0); pwd)
+config_dir="${HOME}/.${script_name}"
+cache_dir="${config_dir}/cache"
+profile_name_path="${config_dir}/profile-name"
+enc_salt_path="${config_dir}/enc-salt"
+mfa_serial_number_path="${config_dir}/mfa-serial-number"
+switch_role_config_path="${config_dir}/switch-role-config" 
+
+print_help() {
+cat <<EOS
+SUBCOMMANDS:
+  mfa
+  assume-role [session-name]
+  assume-role-all
+  list
+  show-mfa-credentials
+  show-switch-credentials
+  init
+
+USAGES:
+  # get session token via MFA
+  ${script_name} mfa
+
+  # get target session token via assume-role (choose from list)
+  ${script_name} assume-role
+
+  # get target session token via assume-role (specify session-name)
+  ${script_name} assume-role \$SESSION_NAME
+
+  # get all session token via assume-role
+  ${script_name} assume-role-all
+
+  # print role list
+  ${script_name} list
+
+  # show current MFA session token
+  ${script_name} show-mfa-credentials
+
+  # show current switch-role session token
+  ${script_name} show-switch-credentials
+
+  # initialize (run only once)
+  ${script_name} init
+EOS
+}
+
+if [ $# -eq 0 ]; then
+  echo "Error: Not enough arguments."
+  echo ""
+  print_help
+  exit 1;
+fi
+
+subcommand=$1
+option1="NOT_SPECIFIED"
+if [ ! -z "${2+UNDEF}" ]; then
+  option1=$2
+fi
+
+initialize(){
+  ## 初期設定
+  ## AWS IAMから発行した 自分の access_key_id, secret_access_key を設定
+  # aws configure --profile ${profile_name}
+
+  # saltやswitch role等の設定情報を置くdirを作成
+  mkdir -p ~/.${script_name}
+
+  # 暗号化された一時認証情報を置くためのdirを作成
+  mkdir -p ${cache_dir}
+
+  # コマンド実行時に一番最初に使用するクレデンシャルを持つprofile名を設定
+  if [ -f ${profile_name_path} ]; then
+    echo "Already ${profile_name_path} exists."
+    echo "  - Skip AWS profile name setting."
+    echo ''
+  else
+    echo 'set your AWS profile name: \c'
+    read profile_name
+    echo ''
+    echo ${profile_name} > ${profile_name_path}
+  fi
+
+  # 認証情報を暗号化するためのパスワードを配置(パスワードは任意)
+  if [ -f ${enc_salt_path} ]; then
+    echo "Already ${enc_salt_path} exists."
+    echo "  - Skip salt setting."
+    echo ''
+  else
+    echo 'set your password using for encrypt and decrypt temporary credentials: \c'
+    read -s your_salt
+    echo ''
+    echo ''
+    chmod 700 ${config_dir}
+    touch ${enc_salt_path}
+    chmod 600 ${enc_salt_path}
+    echo ${your_salt} > ${enc_salt_path}
+  fi
+
+  # MFAデバイスのarnを設定 (https://console.aws.amazon.com/iam/home?region=us-east-2#/security_credentials から確認可)
+  if [ -f ${mfa_serial_number_path} ]; then
+    echo "Already ${mfa_serial_number_path} exists."
+    echo "  - Skip MFA Device ARN setting."
+    echo ''
+  else
+    echo 'You can get "MFA Device ARN" from https://console.aws.amazon.com/iam/home?region=us-east-2#/security_credentials'
+    echo 'set your MFA Device ARN (ex. arn:aws:iam::012345678901:mfa/user.name): \c'
+    read your_mfa_deivice_arn
+    echo ''
+    echo ${your_mfa_deivice_arn} > ${mfa_serial_number_path}
+  fi
+
+  # switch先のrole情報を設定
+  # 以下のChrome ExtentionのConfigurationと同様にTOMLで書く
+  # https://chrome.google.com/webstore/detail/aws-extend-switch-roles/jpmkfafbacpgapdghgdpembnojdlgkdl?utm_source=github
+  if [ -f ${switch_role_config_path} ]; then
+    echo "Already ${switch_role_config_path} exists."
+    echo "  - Skip switch-role-config creating'."
+    echo ''
+  else
+    touch ${switch_role_config_path}
+    echo "- Please configure switch role setting(TOML) referring to the following URL."
+    echo "    - https://chrome.google.com/webstore/detail/aws-extend-switch-roles/jpmkfafbacpgapdghgdpembnojdlgkdl?utm_source=github"
+    echo ''
+    echo "$ vim ${switch_role_config_path}"
+    echo ''
+  fi
+
+  echo "Add function for switch-role."
+  echo "Set rcfile full path [Default: ${HOME}/.zshrc.aws-switch-role-via-mfa]: \c"
+  read rcfile
+  echo ''
+  if [ "$rcfile" = "" ];then
+    rcfile="${HOME}/.zshrc.aws-switch-role-via-mfa"
+  fi
+
+  cat << EOS > ${rcfile}
+# ---- for aws-switch-role-via-mfa ----
+export PATH=\$PATH:$script_dir
+function switch-role(){
+    switch_role_config_path="${switch_role_config_path}"
+    enc_salt_path="${enc_salt_path}"
+    cache_dir="${cache_dir}"
+EOS
+  cat << 'EOS' >> ${rcfile}
+    option1="NOT_SPECIFIED"
+    if [ ! -z "${1+UNDEF}" ]; then
+      option1=$1
+    fi
+    if [ "${option1}" = "-h" ]; then
+        echo "USAGES:"
+        echo "  switch-role"
+        echo "  switch-role [SESSION_NAME]"
+        return 0
+    fi
+    if [ "${option1}" = "help" ]; then
+        echo "USAGES:"
+        echo "  switch-role"
+        echo "  switch-role [SESSION_NAME]"
+        return 0
+    fi
+    if [ "${option1}" = "NOT_SPECIFIED" ]; then
+      session_name=$(cat ${switch_role_config_path} | egrep '^\[' | sed -e 's/\[//' | sed -e 's/\]//'  | peco)
+    else
+      session_name=${option1}
+    fi
+    account_id=$(egrep -A 10 "^\[${session_name}\]" ${switch_role_config_path} | grep aws_account_id | head -1 | awk -F '=' {'print $2'} | tr -d ' ')
+    role_name=$(egrep -A 10 "^\[${session_name}\]" ${switch_role_config_path} | grep role_name | head -1 | awk -F '=' {'print $2'} | tr -d ' ')
+    role_arn="arn:aws:iam::${account_id}:role/${role_name}"
+
+    export AWS_SECRET_ACCESS_KEY=$(openssl aes-256-cbc -d -in ${cache_dir}/${session_name}.sts.enc -pass file:${enc_salt_path} | grep SecretAccessKey | awk {'print $2'} | sed -e 's/"//g' | sed -e 's/,//')
+    export AWS_ACCESS_KEY_ID=$(openssl aes-256-cbc -d -in ${cache_dir}/${session_name}.sts.enc -pass file:${enc_salt_path} | grep AccessKeyId | awk {'print $2'} | sed -e 's/"//g' | sed -e 's/,//')
+    export AWS_SESSION_TOKEN=$(openssl aes-256-cbc -d -in ${cache_dir}/${session_name}.sts.enc -pass file:${enc_salt_path} | grep SessionToken | awk {'print $2'} | sed -e 's/"//g' | sed -e 's/,//')
+    export X_AWS_SESSION_NAME=${session_name}
+}
+
+function current-role(){
+   echo ${X_AWS_SESSION_NAME}
+}
+# /---- for aws-switch-role-via-mfa ----
+EOS
+
+  echo "Please add 'source' to your ~/.bashrc or ~/.zshrc."
+cat << EOS
+
+: In case of zsh
+$ echo "source ${rcfile}" >> ~/.zshrc
+$ source ~/.zshrc
+
+EOS
+}
+
+show_mfa_credentials(){
+  openssl aes-256-cbc -d -in ${cache_dir}/mfa_session_token.sts.enc -pass file:${enc_salt_path} | less
+}
+
+show_switch_credentials(){
+  session_name=$(cat ${switch_role_config_path} | egrep '^\[' | sed -e 's/\[//' | sed -e 's/\]//'  | peco)
+  openssl aes-256-cbc -d -in ${cache_dir}/${session_name}.sts.enc -pass file:${enc_salt_path} | less
+}
+
+get_token_via_mfa(){
+  # get-session-token でMFAを利用して一時認証情報を取得し、暗号化してファイルに吐く
+  echo 'MFA token code: '; read mfa_token_code; echo ""; aws --profile $(cat ${profile_name_path}) sts get-session-token --serial-number $(cat ${mfa_serial_number_path}) --token-code ${mfa_token_code} | openssl aes-256-cbc -e -out ${cache_dir}/mfa_session_token.sts.enc -pass file:${enc_salt_path}
+}
+
+assume_role(){
+  export AWS_SECRET_ACCESS_KEY=$(openssl aes-256-cbc -d -in ${cache_dir}/mfa_session_token.sts.enc -pass file:${enc_salt_path} | grep SecretAccessKey | awk {'print $2'} | sed -e 's/"//g' | sed -e 's/,//')
+  export AWS_ACCESS_KEY_ID=$(openssl aes-256-cbc -d -in ${cache_dir}/mfa_session_token.sts.enc -pass file:${enc_salt_path} | grep AccessKeyId | awk {'print $2'} | sed -e 's/"//g' | sed -e 's/,//')
+  export AWS_SESSION_TOKEN=$(openssl aes-256-cbc -d -in ${cache_dir}/mfa_session_token.sts.enc -pass file:${enc_salt_path} | grep SessionToken | awk {'print $2'} | sed -e 's/"//g' | sed -e 's/,//')
+
+  # assume-role で一時認証情報を取得し、暗号化してファイルに吐く
+  if [ "${option1}" = "NOT_SPECIFIED" ]; then
+    session_name=$(cat ${switch_role_config_path} | egrep '^\[' | sed -e 's/\[//' | sed -e 's/\]//'  | peco)
+  else
+    session_name=${option1}
+  fi
+  account_id=$(egrep -A 10 "^\[${session_name}\]" ${switch_role_config_path} | grep aws_account_id | head -1 | awk -F '=' {'print $2'} | tr -d ' ')
+  role_name=$(egrep -A 10 "^\[${session_name}\]" ${switch_role_config_path} | grep role_name | head -1 | awk -F '=' {'print $2'} | tr -d ' ')
+  role_arn="arn:aws:iam::${account_id}:role/${role_name}"
+
+  aws sts assume-role --role-arn ${role_arn} --role-session-name ${session_name} | openssl aes-256-cbc -e -out ${cache_dir}/${session_name}.sts.enc -pass file:${enc_salt_path}
+}
+
+assume_role_all(){
+  export AWS_SECRET_ACCESS_KEY=$(openssl aes-256-cbc -d -in ${cache_dir}/mfa_session_token.sts.enc -pass file:${enc_salt_path} | grep SecretAccessKey | awk {'print $2'} | sed -e 's/"//g' | sed -e 's/,//')
+  export AWS_ACCESS_KEY_ID=$(openssl aes-256-cbc -d -in ${cache_dir}/mfa_session_token.sts.enc -pass file:${enc_salt_path} | grep AccessKeyId | awk {'print $2'} | sed -e 's/"//g' | sed -e 's/,//')
+  export AWS_SESSION_TOKEN=$(openssl aes-256-cbc -d -in ${cache_dir}/mfa_session_token.sts.enc -pass file:${enc_salt_path} | grep SessionToken | awk {'print $2'} | sed -e 's/"//g' | sed -e 's/,//')
+
+  echo "# [INFO] start assume-role"
+  # assume-role で一時認証情報を取得し、暗号化してファイルに吐く
+  for session_name in $(cat ${switch_role_config_path} | egrep '^\[' | sed -e 's/\[//' | sed -e 's/\]//'); do
+    account_id=$(egrep -A 10 "^\[${session_name}\]" ${switch_role_config_path} | grep aws_account_id | head -1 | awk -F '=' {'print $2'} | tr -d ' ')
+    role_name=$(egrep -A 10 "^\[${session_name}\]" ${switch_role_config_path} | grep role_name | head -1 | awk -F '=' {'print $2'} | tr -d ' ')
+    role_arn="arn:aws:iam::${account_id}:role/${role_name}"
+
+    echo "- ${session_name}"
+    aws sts assume-role --role-arn ${role_arn} --role-session-name ${session_name} | openssl aes-256-cbc -e -out ${cache_dir}/${session_name}.sts.enc -pass file:${enc_salt_path}
+    sleep 1
+  done
+
+  echo "# [INFO] finished"
+}
+
+main(){
+  case $subcommand in
+    mfa)
+      get_token_via_mfa
+      ;;
+    assume-role)
+      assume_role
+      ;;
+    assume-role-all)
+      assume_role_all
+      ;;
+    list)
+      cat ${switch_role_config_path}
+      ;;
+    show-mfa-credentials)
+      show_mfa_credentials
+      ;;
+    show-switch-credentials)
+      show_switch_credentials
+      ;;
+    init)
+      initialize
+      ;;
+    *)  print_help
+        exit 0;
+        ;;
+  esac
+}
+
+main
