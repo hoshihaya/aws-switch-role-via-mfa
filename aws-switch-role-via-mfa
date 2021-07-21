@@ -15,6 +15,7 @@ cat <<EOS
 SUBCOMMANDS:
   mfa
   assume-role [session-name]
+  assume-role-without-mfa [session-name]
   assume-role-all
   list
   show-mfa-credentials
@@ -248,6 +249,20 @@ assume_role_all(){
   echo "# [INFO] finished"
 }
 
+assume_role_without_mfa(){
+  # assume-role で一時認証情報を取得し、暗号化してファイルに吐く
+  if [ "${option1}" = "NOT_SPECIFIED" ]; then
+    session_name=$(cat ${switch_role_config_path} | egrep '^\[' | sed -e 's/\[//' | sed -e 's/\]//'  | peco)
+  else
+    session_name=${option1}
+  fi
+  account_id=$(egrep -A 10 "^\[${session_name}\]" ${switch_role_config_path} | grep aws_account_id | head -1 | awk -F '=' '{print $2}' | tr -d ' ')
+  role_name=$(egrep -A 10 "^\[${session_name}\]" ${switch_role_config_path} | grep role_name | head -1 | awk -F '=' '{print $2}' | tr -d ' ')
+  role_arn="arn:aws:iam::${account_id}:role/${role_name}"
+
+  aws sts assume-role --role-arn ${role_arn} --role-session-name ${session_name} | openssl aes-256-cbc -e -out ${cache_dir}/${session_name}.sts.enc -pass file:${enc_salt_path}
+}
+
 main(){
   case $subcommand in
     mfa)
@@ -255,6 +270,9 @@ main(){
       ;;
     assume-role)
       assume_role
+      ;;
+    assume-role-without-mfa)
+      assume_role_without_mfa
       ;;
     assume-role-all)
       assume_role_all
