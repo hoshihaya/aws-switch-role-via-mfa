@@ -169,9 +169,9 @@ EOS
       session_name=${option1}
     fi
 
-    export AWS_SECRET_ACCESS_KEY=$(openssl aes-256-cbc -d -in ${cache_dir}/${session_name}.sts.enc -pass file:${enc_salt_path} | grep SecretAccessKey | awk '{print $2}' | sed -e 's/"//g' | sed -e 's/,//')
-    export AWS_ACCESS_KEY_ID=$(openssl aes-256-cbc -d -in ${cache_dir}/${session_name}.sts.enc -pass file:${enc_salt_path} | grep AccessKeyId | awk '{print $2}' | sed -e 's/"//g' | sed -e 's/,//')
-    export AWS_SESSION_TOKEN=$(openssl aes-256-cbc -d -in ${cache_dir}/${session_name}.sts.enc -pass file:${enc_salt_path} | grep SessionToken | awk '{print $2}' | sed -e 's/"//g' | sed -e 's/,//')
+    export AWS_SECRET_ACCESS_KEY=$(openssl aes-256-cbc -iter 100 -d -in ${cache_dir}/${session_name}.sts.enc -pass file:${enc_salt_path} | grep SecretAccessKey | awk '{print $2}' | sed -e 's/"//g' | sed -e 's/,//')
+    export AWS_ACCESS_KEY_ID=$(openssl aes-256-cbc -iter 100 -d -in ${cache_dir}/${session_name}.sts.enc -pass file:${enc_salt_path} | grep AccessKeyId | awk '{print $2}' | sed -e 's/"//g' | sed -e 's/,//')
+    export AWS_SESSION_TOKEN=$(openssl aes-256-cbc -iter 100 -d -in ${cache_dir}/${session_name}.sts.enc -pass file:${enc_salt_path} | grep SessionToken | awk '{print $2}' | sed -e 's/"//g' | sed -e 's/,//')
     export X_AWS_SESSION_NAME=${session_name}
 }
 
@@ -192,12 +192,12 @@ EOS
 }
 
 show_mfa_credentials(){
-  openssl aes-256-cbc -d -in ${cache_dir}/mfa_session_token.sts.enc -pass file:${enc_salt_path} | less
+  openssl aes-256-cbc -iter 100 -d -in ${cache_dir}/mfa_session_token.sts.enc -pass file:${enc_salt_path} | less
 }
 
 show_switch_credentials(){
   session_name=$(cat ${switch_role_config_path} | egrep '^\[' | sed -e 's/\[//' | sed -e 's/\]//'  | peco)
-  openssl aes-256-cbc -d -in ${cache_dir}/${session_name}.sts.enc -pass file:${enc_salt_path} | less
+  openssl aes-256-cbc -iter 100 -d -in ${cache_dir}/${session_name}.sts.enc -pass file:${enc_salt_path} | less
 }
 
 get_token_via_mfa(){
@@ -208,13 +208,13 @@ get_token_via_mfa(){
   else
     mfa_token_code=${option1}
   fi
-  aws --profile $(cat ${profile_name_path}) sts get-session-token --serial-number $(cat ${mfa_serial_number_path}) --token-code ${mfa_token_code} | openssl aes-256-cbc -e -out ${cache_dir}/mfa_session_token.sts.enc -pass file:${enc_salt_path}
+  aws --profile $(cat ${profile_name_path}) sts get-session-token --serial-number $(cat ${mfa_serial_number_path}) --token-code ${mfa_token_code} | openssl aes-256-cbc -iter 100 -e -out ${cache_dir}/mfa_session_token.sts.enc -pass file:${enc_salt_path}
 }
 
 assume_role(){
-  export AWS_SECRET_ACCESS_KEY=$(openssl aes-256-cbc -d -in ${cache_dir}/mfa_session_token.sts.enc -pass file:${enc_salt_path} | grep SecretAccessKey | awk '{print $2}' | sed -e 's/"//g' | sed -e 's/,//')
-  export AWS_ACCESS_KEY_ID=$(openssl aes-256-cbc -d -in ${cache_dir}/mfa_session_token.sts.enc -pass file:${enc_salt_path} | grep AccessKeyId | awk '{print $2}' | sed -e 's/"//g' | sed -e 's/,//')
-  export AWS_SESSION_TOKEN=$(openssl aes-256-cbc -d -in ${cache_dir}/mfa_session_token.sts.enc -pass file:${enc_salt_path} | grep SessionToken | awk '{print $2}' | sed -e 's/"//g' | sed -e 's/,//')
+  export AWS_SECRET_ACCESS_KEY=$(openssl aes-256-cbc -iter 100 -d -in ${cache_dir}/mfa_session_token.sts.enc -pass file:${enc_salt_path} | grep SecretAccessKey | awk '{print $2}' | sed -e 's/"//g' | sed -e 's/,//')
+  export AWS_ACCESS_KEY_ID=$(openssl aes-256-cbc -iter 100 -d -in ${cache_dir}/mfa_session_token.sts.enc -pass file:${enc_salt_path} | grep AccessKeyId | awk '{print $2}' | sed -e 's/"//g' | sed -e 's/,//')
+  export AWS_SESSION_TOKEN=$(openssl aes-256-cbc -iter 100 -d -in ${cache_dir}/mfa_session_token.sts.enc -pass file:${enc_salt_path} | grep SessionToken | awk '{print $2}' | sed -e 's/"//g' | sed -e 's/,//')
 
   # assume-role で一時認証情報を取得し、暗号化してファイルに吐く
   if [ "${option1}" = "NOT_SPECIFIED" ]; then
@@ -226,13 +226,13 @@ assume_role(){
   role_name=$(egrep -A 10 "^\[${session_name}\]" ${switch_role_config_path} | grep role_name | head -1 | awk -F '=' '{print $2}' | tr -d ' ')
   role_arn="arn:aws:iam::${account_id}:role/${role_name}"
 
-  aws sts assume-role --role-arn ${role_arn} --role-session-name ${session_name} | openssl aes-256-cbc -e -out ${cache_dir}/${session_name}.sts.enc -pass file:${enc_salt_path}
+  aws sts assume-role --role-arn ${role_arn} --role-session-name ${session_name} | openssl aes-256-cbc -iter 100 -e -out ${cache_dir}/${session_name}.sts.enc -pass file:${enc_salt_path}
 }
 
 assume_role_all(){
-  export AWS_SECRET_ACCESS_KEY=$(openssl aes-256-cbc -d -in ${cache_dir}/mfa_session_token.sts.enc -pass file:${enc_salt_path} | grep SecretAccessKey | awk '{print $2}' | sed -e 's/"//g' | sed -e 's/,//')
-  export AWS_ACCESS_KEY_ID=$(openssl aes-256-cbc -d -in ${cache_dir}/mfa_session_token.sts.enc -pass file:${enc_salt_path} | grep AccessKeyId | awk '{print $2}' | sed -e 's/"//g' | sed -e 's/,//')
-  export AWS_SESSION_TOKEN=$(openssl aes-256-cbc -d -in ${cache_dir}/mfa_session_token.sts.enc -pass file:${enc_salt_path} | grep SessionToken | awk '{print $2}' | sed -e 's/"//g' | sed -e 's/,//')
+  export AWS_SECRET_ACCESS_KEY=$(openssl aes-256-cbc -iter 100 -d -in ${cache_dir}/mfa_session_token.sts.enc -pass file:${enc_salt_path} | grep SecretAccessKey | awk '{print $2}' | sed -e 's/"//g' | sed -e 's/,//')
+  export AWS_ACCESS_KEY_ID=$(openssl aes-256-cbc -iter 100 -d -in ${cache_dir}/mfa_session_token.sts.enc -pass file:${enc_salt_path} | grep AccessKeyId | awk '{print $2}' | sed -e 's/"//g' | sed -e 's/,//')
+  export AWS_SESSION_TOKEN=$(openssl aes-256-cbc -iter 100 -d -in ${cache_dir}/mfa_session_token.sts.enc -pass file:${enc_salt_path} | grep SessionToken | awk '{print $2}' | sed -e 's/"//g' | sed -e 's/,//')
 
   echo "# [INFO] start assume-role"
   # assume-role で一時認証情報を取得し、暗号化してファイルに吐く
@@ -242,7 +242,7 @@ assume_role_all(){
     role_arn="arn:aws:iam::${account_id}:role/${role_name}"
 
     echo "- ${session_name}"
-    aws sts assume-role --role-arn ${role_arn} --role-session-name ${session_name} | openssl aes-256-cbc -e -out ${cache_dir}/${session_name}.sts.enc -pass file:${enc_salt_path}
+    aws sts assume-role --role-arn ${role_arn} --role-session-name ${session_name} | openssl aes-256-cbc -iter 100 -e -out ${cache_dir}/${session_name}.sts.enc -pass file:${enc_salt_path}
     sleep 1
   done
 
@@ -260,7 +260,7 @@ assume_role_without_mfa(){
   role_name=$(egrep -A 10 "^\[${session_name}\]" ${switch_role_config_path} | grep role_name | head -1 | awk -F '=' '{print $2}' | tr -d ' ')
   role_arn="arn:aws:iam::${account_id}:role/${role_name}"
 
-  aws sts assume-role --role-arn ${role_arn} --role-session-name ${session_name} | openssl aes-256-cbc -e -out ${cache_dir}/${session_name}.sts.enc -pass file:${enc_salt_path}
+  aws sts assume-role --role-arn ${role_arn} --role-session-name ${session_name} | openssl aes-256-cbc -iter 100 -e -out ${cache_dir}/${session_name}.sts.enc -pass file:${enc_salt_path}
 }
 
 main(){
